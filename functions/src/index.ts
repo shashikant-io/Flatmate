@@ -72,36 +72,39 @@ export const createInvitation = onCall({ region: 'asia-south1' }, async (request
   const member = await db.doc(`flats/${input.data.flatId}/members/${request.auth.uid}`).get()
   if (member.data()?.role !== 'admin') throw new HttpsError('permission-denied', 'Only admins can invite members')
   const token = crypto.randomUUID()
-  const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
-  const invitationRef = db.collection(`flats/${input.data.flatId}/invitations`).doc()
+  const invitationToken = `${input.data.flatId}.${token}`
+  const tokenHash = crypto.createHash('sha256').update(invitationToken).digest('hex')
+  const invitationRef = db.doc(`flats/${input.data.flatId}/invitations/${tokenHash}`)
   await invitationRef.set({
-    email: input.data.email.toLowerCase(), tokenHash, status: 'pending',
+    flatId: input.data.flatId, invitedEmail: input.data.email.trim().toLowerCase(),
+    invitedBy: request.auth.uid, tokenHash, status: 'pending',
     createdBy: request.auth.uid, createdAt: nowIso(), expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
   })
   await db.collection('mail').add({
     to: input.data.email.toLowerCase(),
     message: {
       subject: 'You are invited to join a FlatMate workspace',
-      text: `Use this invitation code in FlatMate: ${token}. It expires in 7 days.`,
+      text: `Use this invitation code in FlatMate: ${invitationToken}. It expires in 7 days.`,
     },
   })
-  return { invitationId: invitationRef.id, token }
+  return { invitationId: invitationRef.id, token: invitationToken }
 })
 
 export const acceptInvitation = onCall({ region: 'asia-south1' }, async (request) => {
   if (!request.auth || !request.auth.token.email) throw new HttpsError('unauthenticated', 'Verified email required')
   const token = z.string().min(20).safeParse(request.data?.token)
   if (!token.success) throw new HttpsError('invalid-argument', 'Invalid invitation')
+  const separator = token.data.indexOf('.')
+  if (separator <= 0) throw new HttpsError('invalid-argument', 'Invalid invitation')
+  const flatId = token.data.slice(0, separator)
   const tokenHash = crypto.createHash('sha256').update(token.data).digest('hex')
-  const invitationQuery = await db.collectionGroup('invitations').where('tokenHash', '==', tokenHash).limit(1).get()
-  if (invitationQuery.empty) throw new HttpsError('not-found', 'Invitation not found')
-  const invitation = invitationQuery.docs[0]
+  const invitation = await db.doc(`flats/${flatId}/invitations/${tokenHash}`).get()
+  if (!invitation.exists) throw new HttpsError('not-found', 'Invitation not found')
   const data = invitation.data()
-  if (data.status !== 'pending' || data.expiresAt < nowIso() || data.email !== request.auth.token.email.toLowerCase()) {
+  const authenticatedEmail = String(request.auth.token.email).trim().toLowerCase()
+  if (data?.status !== 'pending' || data?.expiresAt < nowIso() || data?.invitedEmail !== authenticatedEmail) {
     throw new HttpsError('permission-denied', 'This invitation is invalid or expired')
   }
-  const flatId = invitation.ref.parent.parent?.id
-  if (!flatId) throw new HttpsError('failed-precondition', 'Invitation flat is invalid')
   await db.runTransaction(async (transaction) => {
     const userRef = db.doc(`users/${request.auth!.uid}`)
     const user = await transaction.get(userRef)

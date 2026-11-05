@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore'
 import { auth, db } from '../firebase'
 import type { FlatContext, FlatMember } from '../types'
 
@@ -52,19 +52,28 @@ export async function acceptInvitation(token: string): Promise<void> {
   if (separator <= 0) throw new Error('Invalid invitation code')
   const flatId = cleanToken.slice(0, separator)
   const tokenHash = await hashInvitationToken(cleanToken)
-  const invitationQuery = query(collection(db, 'flats', flatId, 'invitations'), where('tokenHash', '==', tokenHash))
-  const invitations = await getDocs(invitationQuery)
-  if (invitations.empty) throw new Error('Invitation code not found or expired')
-  const invitation = invitations.docs[0]
-  const data = invitation.data()
-  if (data.status !== 'pending' || data.email !== currentUser.email.toLowerCase() || data.expiresAt < new Date().toISOString()) {
-    throw new Error('This invitation is expired or belongs to another email address')
+  const invitation = doc(db, 'flats', flatId, 'invitations', tokenHash)
+  const invitationSnapshot = await getDoc(invitation)
+  if (!invitationSnapshot.exists()) throw new Error('Invitation code not found or expired')
+  const data = invitationSnapshot.data()
+  const invitedEmail = String(data.invitedEmail ?? data.email ?? '').trim().toLowerCase()
+  const authenticatedEmail = currentUser.email.trim().toLowerCase()
+  if (data.status === 'accepted') throw new Error('This invitation has already been accepted')
+  if (data.status === 'revoked') throw new Error('This invitation has been revoked')
+  if (data.status !== 'pending' || data.expiresAt < new Date().toISOString()) {
+    throw new Error('This invitation is expired or invalid')
+  }
+  if (invitedEmail !== authenticatedEmail) {
+    const masked = invitedEmail.replace(/^(.{2})[^@]*(@.*)$/, '$1***$2')
+    throw new Error(`This invitation is for ${masked}. Sign in with that email address.`)
   }
   const flatRef = doc(db, 'flats', flatId)
   const memberRef = doc(flatRef, 'members', currentUser.uid)
   const userRef = doc(db, 'users', currentUser.uid)
   await runTransaction(db, async (transaction) => {
     const user = await transaction.get(userRef)
+    const existingMember = await transaction.get(memberRef)
+    if (existingMember.exists()) throw new Error('You are already a member of this flat')
     const flatIds = Array.from(new Set([...(user.data()?.flatIds ?? []), flatRef.id]))
     transaction.set(memberRef, {
       uid: currentUser.uid,
@@ -74,7 +83,7 @@ export async function acceptInvitation(token: string): Promise<void> {
       joinedAt: serverTimestamp(),
     })
     transaction.set(userRef, { activeFlatId: flatRef.id, flatIds }, { merge: true })
-    transaction.update(invitation.ref, {
+    transaction.update(invitation, {
       status: 'accepted',
       acceptedBy: currentUser.uid,
       acceptedAt: serverTimestamp(),
@@ -83,10 +92,14 @@ export async function acceptInvitation(token: string): Promise<void> {
 }
 
 export async function createInvitation(flatId: string, email: string): Promise<{ token: string }> {
+  const invitedEmail = email.trim().toLowerCase()
+  if (!invitedEmail) throw new Error('A recipient email address is required')
   const token = `${flatId}.${crypto.randomUUID()}`
   const tokenHash = await hashInvitationToken(token)
-  await addDoc(collection(db, 'flats', flatId, 'invitations'), {
-    email: email.trim().toLowerCase(),
+  await setDoc(doc(db, 'flats', flatId, 'invitations', tokenHash), {
+    flatId,
+    invitedEmail,
+    invitedBy: auth.currentUser?.uid,
     tokenHash,
     status: 'pending',
     createdBy: auth.currentUser?.uid,
