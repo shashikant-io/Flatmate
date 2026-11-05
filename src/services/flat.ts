@@ -1,7 +1,5 @@
-import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore'
-import { httpsCallable } from 'firebase/functions'
+import { addDoc, collection, collectionGroup, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore'
 import { auth, db } from '../firebase'
-import { getAppFunctions } from './functions'
 import type { FlatContext, FlatMember } from '../types'
 
 export async function getUserFlat(uid: string): Promise<FlatContext | null> {
@@ -46,7 +44,39 @@ export async function switchFlat(uid: string, flatId: string): Promise<void> {
 }
 
 export async function acceptInvitation(token: string): Promise<void> {
-  await httpsCallable<{ token: string }, { flatId: string }>(getAppFunctions(), 'acceptInvitation')({ token })
+  const currentUser = auth.currentUser
+  if (!currentUser) throw new Error('Please create an account or sign in before accepting an invitation')
+  if (!currentUser.email) throw new Error('Your account must have an email address')
+  const tokenHash = await hashInvitationToken(token.trim())
+  const invitationQuery = query(collectionGroup(db, 'invitations'), where('tokenHash', '==', tokenHash))
+  const invitations = await getDocs(invitationQuery)
+  if (invitations.empty) throw new Error('Invitation code not found or expired')
+  const invitation = invitations.docs[0]
+  const data = invitation.data()
+  if (data.status !== 'pending' || data.email !== currentUser.email.toLowerCase() || data.expiresAt < new Date().toISOString()) {
+    throw new Error('This invitation is expired or belongs to another email address')
+  }
+  const flatRef = invitation.ref.parent.parent
+  if (!flatRef) throw new Error('Invitation is linked to an invalid flat')
+  const memberRef = doc(flatRef, 'members', currentUser.uid)
+  const userRef = doc(db, 'users', currentUser.uid)
+  await runTransaction(db, async (transaction) => {
+    const user = await transaction.get(userRef)
+    const flatIds = Array.from(new Set([...(user.data()?.flatIds ?? []), flatRef.id]))
+    transaction.set(memberRef, {
+      uid: currentUser.uid,
+      displayName: currentUser.displayName || currentUser.email,
+      role: 'member',
+      invitationId: invitation.id,
+      joinedAt: serverTimestamp(),
+    })
+    transaction.set(userRef, { activeFlatId: flatRef.id, flatIds }, { merge: true })
+    transaction.update(invitation.ref, {
+      status: 'accepted',
+      acceptedBy: currentUser.uid,
+      acceptedAt: serverTimestamp(),
+    })
+  })
 }
 
 export async function createInvitation(flatId: string, email: string): Promise<{ token: string }> {
