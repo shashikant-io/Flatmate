@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
+import { addDoc, collection, doc, onSnapshot, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase'
 import { auth } from '../firebase'
 import type { Expense } from '../types'
@@ -40,14 +40,15 @@ export function subscribeToExpenses(
   onChange: (expenses: Expense[]) => void,
   onError: (error: Error) => void,
 ): () => void {
-  const expensesQuery = query(
-    expensesRef(flatId),
-    where('purchaseDate', '>=', `${month}-01`),
-    where('purchaseDate', '<=', `${month}-31`),
-    orderBy('purchaseDate', 'desc'),
-  )
-  return onSnapshot(expensesQuery, (snapshot) => {
-    onChange(snapshot.docs.filter((item) => !item.data().deletedAt).map((item) => {
+  return onSnapshot(expensesRef(flatId), (snapshot) => {
+    const monthExpenses = snapshot.docs
+      .filter((item) => {
+        const purchaseDate = item.data().purchaseDate
+        return typeof purchaseDate === 'string' && purchaseDate.startsWith(`${month}-`)
+      })
+      .filter((item) => !item.data().deletedAt)
+      .sort((left, right) => String(right.data().purchaseDate).localeCompare(String(left.data().purchaseDate)))
+    onChange(monthExpenses.map((item) => {
       const data = item.data()
       const amountInPaise = Number(data.amountInPaise ?? 0)
       const purchaseDate = String(data.purchaseDate)

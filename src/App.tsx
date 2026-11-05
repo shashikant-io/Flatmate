@@ -106,24 +106,34 @@ function App() {
       setExpenses([])
       return
     }
+    let disposed = false
     let unsubscribe = () => {}
     setFlatLoading(true)
     void getUserFlat(user.uid).then((context) => {
+      if (disposed) return
       if (!context) {
         setFlatId(null)
         setProfileName(user.displayName ?? '')
+        setExpenses([])
         return
       }
       setFlatId(context.flatId)
       setFlatName(context.flatName)
       setMembers(context.members)
       setProfileName(context.displayName || user.displayName || '')
-      unsubscribe = subscribeToExpenses(context.flatId, currentMonth, setExpenses, (error) => console.error('Expense subscription failed', error))
+      const listen = subscribeToExpenses(context.flatId, currentMonth, setExpenses, (error) => console.error('Expense synchronization failed', error))
+      if (disposed) listen()
+      else unsubscribe = listen
     }).catch((error) => {
+      if (disposed) return
       console.error('Flat profile load failed', error)
       setFlatId(null)
+      setExpenses([])
     }).finally(() => setFlatLoading(false))
-    return () => unsubscribe()
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
   }, [user, currentMonth])
 
   if (authLoading) return <div className="auth-loading"><div className="brand-mark">F</div><span>Loading FlatMate…</span></div>
