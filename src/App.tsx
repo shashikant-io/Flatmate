@@ -45,14 +45,17 @@ const getGreeting = (date: Date) => {
 }
 const getFirebaseErrorMessage = (error: unknown) => {
   if (error instanceof FirebaseError) {
-    if (error.code === 'permission-denied' || error.code === 'functions/permission-denied') return 'Permission denied. Please use an authorized account.'
+    if (error.code === 'permission-denied') return 'Invitation permission denied. Sign in with the invited Gmail address.'
+    if (error.code === 'failed-precondition') return 'Invitation service is not ready. Please contact the administrator.'
+    if (error.code === 'not-found') return 'Invitation code was not found or has expired.'
+    if (error.code === 'functions/permission-denied') return 'Permission denied. Please use an authorized account.'
     if (error.code === 'unauthenticated' || error.code === 'functions/unauthenticated') return 'Authentication required. Please sign in again.'
     if (error.code === 'unavailable' || error.code === 'functions/unavailable' || error.code === 'failed-precondition') return 'Network or Firebase service unavailable. Please try again.'
     if (error.code === 'functions/not-found') return 'Flat creation service is not deployed. Contact the administrator.'
-    if (error.code === 'functions/internal') return 'Flat creation failed on the server. Please try again or contact the administrator.'
+    if (error.code === 'functions/internal') return 'Firebase operation failed on the server. Please try again or contact the administrator.'
     return error.message || 'Flat creation failed. Please try again.'
   }
-  return error instanceof Error ? error.message : 'Flat creation failed. Please try again.'
+  return error instanceof Error ? error.message : 'Invitation acceptance failed. Please try again.'
 }
 const navItems = [
   { label: 'Overview', icon: Home }, { label: 'History', icon: Receipt },

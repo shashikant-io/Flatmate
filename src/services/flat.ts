@@ -1,4 +1,4 @@
-import { addDoc, collection, collectionGroup, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore'
+import { addDoc, collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore'
 import { auth, db } from '../firebase'
 import type { FlatContext, FlatMember } from '../types'
 
@@ -47,8 +47,12 @@ export async function acceptInvitation(token: string): Promise<void> {
   const currentUser = auth.currentUser
   if (!currentUser) throw new Error('Please create an account or sign in before accepting an invitation')
   if (!currentUser.email) throw new Error('Your account must have an email address')
-  const tokenHash = await hashInvitationToken(token.trim())
-  const invitationQuery = query(collectionGroup(db, 'invitations'), where('tokenHash', '==', tokenHash))
+  const cleanToken = token.trim()
+  const separator = cleanToken.indexOf('.')
+  if (separator <= 0) throw new Error('Invalid invitation code')
+  const flatId = cleanToken.slice(0, separator)
+  const tokenHash = await hashInvitationToken(cleanToken)
+  const invitationQuery = query(collection(db, 'flats', flatId, 'invitations'), where('tokenHash', '==', tokenHash))
   const invitations = await getDocs(invitationQuery)
   if (invitations.empty) throw new Error('Invitation code not found or expired')
   const invitation = invitations.docs[0]
@@ -56,8 +60,7 @@ export async function acceptInvitation(token: string): Promise<void> {
   if (data.status !== 'pending' || data.email !== currentUser.email.toLowerCase() || data.expiresAt < new Date().toISOString()) {
     throw new Error('This invitation is expired or belongs to another email address')
   }
-  const flatRef = invitation.ref.parent.parent
-  if (!flatRef) throw new Error('Invitation is linked to an invalid flat')
+  const flatRef = doc(db, 'flats', flatId)
   const memberRef = doc(flatRef, 'members', currentUser.uid)
   const userRef = doc(db, 'users', currentUser.uid)
   await runTransaction(db, async (transaction) => {
@@ -80,7 +83,7 @@ export async function acceptInvitation(token: string): Promise<void> {
 }
 
 export async function createInvitation(flatId: string, email: string): Promise<{ token: string }> {
-  const token = crypto.randomUUID()
+  const token = `${flatId}.${crypto.randomUUID()}`
   const tokenHash = await hashInvitationToken(token)
   await addDoc(collection(db, 'flats', flatId, 'invitations'), {
     email: email.trim().toLowerCase(),
