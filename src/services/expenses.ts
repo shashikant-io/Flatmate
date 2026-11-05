@@ -1,8 +1,6 @@
-import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
+import { addDoc, collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
 import { db } from '../firebase'
 import { auth } from '../firebase'
-import { httpsCallable } from 'firebase/functions'
-import { getAppFunctions } from './functions'
 import type { Expense } from '../types'
 
 export interface ExpenseInput {
@@ -23,10 +21,17 @@ function expensesRef(flatId: string) {
 }
 
 export async function createExpense(flatId: string, input: ExpenseInput): Promise<string> {
-  const result = await httpsCallable<ExpenseInput & { flatId: string }, { expenseId: string }>(getAppFunctions(), 'createExpense')({
-    ...input, flatId, amountInPaise: Math.trunc(input.amountInPaise),
+  const uid = auth.currentUser?.uid
+  if (!uid) throw new Error('Authentication required. Please sign in again.')
+  const reference = await addDoc(expensesRef(flatId), {
+    ...input,
+    amountInPaise: Math.trunc(input.amountInPaise),
+    createdBy: uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    deletedAt: null,
   })
-  return result.data.expenseId
+  return reference.id
 }
 
 export function subscribeToExpenses(
