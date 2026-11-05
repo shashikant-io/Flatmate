@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, getDocs, setDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import { db, functions } from '../firebase'
+import { db } from '../firebase'
+import { getAppFunctions } from './functions'
 import type { FlatContext, FlatMember } from '../types'
 
 export async function getUserFlat(uid: string): Promise<FlatContext | null> {
@@ -21,7 +22,7 @@ export async function getUserFlat(uid: string): Promise<FlatContext | null> {
 export async function createFlat(uid: string, displayName: string, flatName: string): Promise<FlatContext> {
   const cleanName = flatName.trim()
   if (!cleanName) throw new Error('Flat name is required')
-  const result = await httpsCallable<{ name: string; displayName: string }, { flatId: string }>(functions, 'createFlat')({
+  const result = await httpsCallable<{ name: string; displayName: string }, { flatId: string }>(getAppFunctions(), 'createFlat')({
     name: cleanName, displayName: displayName.trim(),
   })
   return { flatId: result.data.flatId, flatName: cleanName, displayName: displayName.trim(), members: [{ uid, displayName: displayName.trim(), role: 'admin' }] }
@@ -34,5 +35,5 @@ export async function switchFlat(uid: string, flatId: string): Promise<void> {
 }
 
 export async function acceptInvitation(token: string): Promise<void> {
-  await httpsCallable<{ token: string }, { flatId: string }>(functions, 'acceptInvitation')({ token })
+  await httpsCallable<{ token: string }, { flatId: string }>(getAppFunctions(), 'acceptInvitation')({ token })
 }

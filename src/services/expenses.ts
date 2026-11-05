@@ -1,7 +1,8 @@
 import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
-import { db, functions } from '../firebase'
+import { db } from '../firebase'
 import { auth } from '../firebase'
 import { httpsCallable } from 'firebase/functions'
+import { getAppFunctions } from './functions'
 import type { Expense } from '../types'
 
 export interface ExpenseInput {
@@ -22,7 +23,7 @@ function expensesRef(flatId: string) {
 }
 
 export async function createExpense(flatId: string, input: ExpenseInput): Promise<string> {
-  const result = await httpsCallable<ExpenseInput & { flatId: string }, { expenseId: string }>(functions, 'createExpense')({
+  const result = await httpsCallable<ExpenseInput & { flatId: string }, { expenseId: string }>(getAppFunctions(), 'createExpense')({
     ...input, flatId, amountInPaise: Math.trunc(input.amountInPaise),
   })
   return result.data.expenseId
