@@ -83,3 +83,20 @@ firebase deploy --only firestore,storage,functions
 - `flats/{flatId}/...` in Storage — private images and receipts
 
 The security rules require an authenticated user and flat membership before reading or writing shared data.
+
+## Invitations
+
+Flat creation, invitation creation, invitation acceptance, and expense creation run through callable
+Functions in `functions/src/index.ts`. Invitation emails are queued in the `/mail` collection for the
+Firebase Trigger Email extension. Install and configure that extension with a transactional email
+provider (for example SMTP, SendGrid, or Mailgun) before using invitations in production. Provider
+credentials stay in the extension configuration and are never exposed to the frontend.
+
+Invitation codes are stored as SHA-256 hashes, expire after seven days, can only be accepted by the
+invited email address, and become `accepted` after the membership transaction succeeds.
+
+## PWA
+
+The Vercel build publishes `public/manifest.webmanifest` and `public/sw.js`. The service worker
+caches the application shell for offline startup. Firestore remains the source of truth; an offline
+expense must not be presented as synchronized until Firestore acknowledges the write.

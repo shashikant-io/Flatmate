@@ -1,7 +1,7 @@
-import {
-  addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where,
-} from 'firebase/firestore'
-import { db } from '../firebase'
+import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
+import { db, functions } from '../firebase'
+import { auth } from '../firebase'
+import { httpsCallable } from 'firebase/functions'
 import type { Expense } from '../types'
 
 export interface ExpenseInput {
@@ -22,14 +22,10 @@ function expensesRef(flatId: string) {
 }
 
 export async function createExpense(flatId: string, input: ExpenseInput): Promise<string> {
-  const reference = await addDoc(expensesRef(flatId), {
-    ...input,
-    amountInPaise: Math.trunc(input.amountInPaise),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    deletedAt: null,
+  const result = await httpsCallable<ExpenseInput & { flatId: string }, { expenseId: string }>(functions, 'createExpense')({
+    ...input, flatId, amountInPaise: Math.trunc(input.amountInPaise),
   })
-  return reference.id
+  return result.data.expenseId
 }
 
 export function subscribeToExpenses(
@@ -45,9 +41,29 @@ export function subscribeToExpenses(
     orderBy('purchaseDate', 'desc'),
   )
   return onSnapshot(expensesQuery, (snapshot) => {
-    onChange(snapshot.docs
-      .filter((item) => !item.data().deletedAt)
-      .map((item) => ({ id: item.id, ...item.data() } as Expense)))
+    onChange(snapshot.docs.filter((item) => !item.data().deletedAt).map((item) => {
+      const data = item.data()
+      const amountInPaise = Number(data.amountInPaise ?? 0)
+      const purchaseDate = String(data.purchaseDate)
+      const formattedDate = new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).format(new Date(purchaseDate))
+      return {
+        id: item.id,
+        item: data.item,
+        amount: amountInPaise / 100,
+        amountInPaise,
+        paidBy: data.paidBy,
+        category: data.category,
+        date: formattedDate,
+        purchaseDate,
+        icon: data.category === 'Groceries' ? '🛒' : data.category === 'Utilities' ? '⚡' : data.category === 'Home care' ? '🧼' : '🍜',
+        color: data.category === 'Groceries' ? 'mint' : data.category === 'Utilities' ? 'yellow' : data.category === 'Home care' ? 'blue' : 'orange',
+        shared: data.expenseType === 'shared',
+        expenseType: data.expenseType,
+        createdBy: data.createdBy,
+      } satisfies Expense
+    }))
   }, onError)
 }
 
@@ -56,9 +72,11 @@ export function updateExpense(flatId: string, expenseId: string, input: Partial<
 }
 
 export function deleteExpense(flatId: string, expenseId: string) {
-  return updateDoc(doc(db, 'flats', flatId, 'expenses', expenseId), { deletedAt: serverTimestamp(), updatedAt: serverTimestamp() })
+  const uid = auth.currentUser?.uid
+  if (!uid) throw new Error('You must be signed in to delete an expense')
+  return updateDoc(doc(db, 'flats', flatId, 'expenses', expenseId), { deletedAt: serverTimestamp(), deletedBy: uid, updatedAt: serverTimestamp() })
 }
 
-export function permanentlyDeleteExpense(flatId: string, expenseId: string) {
-  return deleteDoc(doc(db, 'flats', flatId, 'expenses', expenseId))
+export function restoreExpense(flatId: string, expenseId: string) {
+  return updateDoc(doc(db, 'flats', flatId, 'expenses', expenseId), { deletedAt: null, deletedBy: null, updatedAt: serverTimestamp() })
 }

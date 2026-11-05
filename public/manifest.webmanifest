@@ -1,0 +1,10 @@
+{
+  "name": "FlatMate",
+  "short_name": "FlatMate",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#16b67a",
+  "description": "Shared household expense manager",
+  "icons": []
+}
