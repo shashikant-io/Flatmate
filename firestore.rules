@@ -3,10 +3,11 @@ service cloud.firestore {
   match /databases/{db}/documents {
     match /users/{userId} {
       allow read: if isSelf(userId);
-      allow create: if isSelf(userId);
+      allow create: if isSelf(userId) &&
+        createsOwnedFlat(request.resource.data.activeFlatId);
       allow update: if isSelf(userId) &&
         (!('activeFlatId' in request.resource.data) ||
-          isFlatMember(request.resource.data.activeFlatId));
+          isFlatMemberAfter(request.resource.data.activeFlatId));
       allow delete: if false;
     }
 
@@ -17,7 +18,11 @@ service cloud.firestore {
 
       match /members/{memberId} {
         allow read: if isFlatMember(flatId);
-        allow create, update, delete: if isFlatAdmin(flatId);
+        allow create: if isFlatAdmin(flatId) ||
+          (signedIn() && request.auth.uid == memberId &&
+            getAfter(/databases/(default)/documents/flats/$(flatId)).data.createdBy == request.auth.uid &&
+            request.resource.data.role == 'admin');
+        allow update, delete: if isFlatAdmin(flatId);
       }
 
       match /expenses/{expenseId} {
@@ -63,11 +68,22 @@ service cloud.firestore {
 
   function isFlatMember(flatId) {
     return signedIn() &&
-      exists(/databases/$(db)/documents/flats/$(flatId)/members/$(request.auth.uid));
+      exists(/databases/(default)/documents/flats/$(flatId)/members/$(request.auth.uid));
+  }
+
+  function isFlatMemberAfter(flatId) {
+    return signedIn() &&
+      getAfter(/databases/(default)/documents/flats/$(flatId)/members/$(request.auth.uid)).data.uid == request.auth.uid;
+  }
+
+  function createsOwnedFlat(flatId) {
+    return signedIn() &&
+      getAfter(/databases/(default)/documents/flats/$(flatId)).data.createdBy == request.auth.uid &&
+      getAfter(/databases/(default)/documents/flats/$(flatId)/members/$(request.auth.uid)).data.role == 'admin';
   }
 
   function isFlatAdmin(flatId) {
     return isFlatMember(flatId) &&
-      get(/databases/$(db)/documents/flats/$(flatId)/members/$(request.auth.uid)).data.role == 'admin';
+      get(/databases/(default)/documents/flats/$(flatId)/members/$(request.auth.uid)).data.role == 'admin';
   }
 }
