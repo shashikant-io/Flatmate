@@ -1,6 +1,6 @@
-import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from 'firebase/firestore'
+import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import { db } from '../firebase'
+import { auth, db } from '../firebase'
 import { getAppFunctions } from './functions'
 import type { FlatContext, FlatMember } from '../types'
 
@@ -50,8 +50,21 @@ export async function acceptInvitation(token: string): Promise<void> {
 }
 
 export async function createInvitation(flatId: string, email: string): Promise<{ token: string }> {
-  const result = await httpsCallable<{ flatId: string; email: string }, { invitationId: string; token: string }>(
-    getAppFunctions(), 'createInvitation',
-  )({ flatId, email: email.trim().toLowerCase() })
-  return { token: result.data.token }
+  const token = crypto.randomUUID()
+  const tokenHash = await hashInvitationToken(token)
+  await addDoc(collection(db, 'flats', flatId, 'invitations'), {
+    email: email.trim().toLowerCase(),
+    tokenHash,
+    status: 'pending',
+    createdBy: auth.currentUser?.uid,
+    createdAt: serverTimestamp(),
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  })
+  return { token }
+}
+
+async function hashInvitationToken(token: string): Promise<string> {
+  const bytes = new TextEncoder().encode(token)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }

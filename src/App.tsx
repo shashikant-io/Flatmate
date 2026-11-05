@@ -218,7 +218,7 @@ function InvitePerson({ flatId, onClose }: { flatId: string; onClose: () => void
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (busy) return
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (!/^[^\s@]+@gmail\.com$/i.test(email.trim())) {
       setError('Enter a valid Gmail address.')
       return
     }
